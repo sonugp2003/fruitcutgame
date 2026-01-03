@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fruit Ninja - Hand Tracking Edition</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        #gameContainer {
+            position: relative;
+            width: 100%;
+            height: 100vh;
+            display: flex;
+        }
+
+        #gameCanvas {
+            flex: 1;
+            background: linear-gradient(180deg, #87CEEB 0%, #E0F6FF 100%);
+            cursor: none;
+            box-shadow: 0 0 30px rgba(0,0,0,0.3);
+        }
+
+        #cameraContainer {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 320px;
+            height: 240px;
+            border: 3px solid #fff;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            background: #000;
+        }
+
+        #webcam {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+        }
+
+        #canvasOverlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        #scoreBoard {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(255,255,255,0.9);
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            z-index: 100;
+        }
+
+        #scoreBoard h2 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        #scoreBoard p {
+            font-size: 18px;
+            margin: 5px 0;
+            color: #333;
+        }
+
+        .score-value {
+            font-weight: bold;
+            color: #764ba2;
+        }
+
+        #startScreen, #gameOverScreen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 200;
+        }
+
+        #gameOverScreen {
+            display: none;
+        }
+
+        h1 {
+            color: #fff;
+            font-size: 64px;
+            margin-bottom: 20px;
+            text-shadow: 3px 3px 6px rgba(0,0,0,0.5);
+        }
+
+        button {
+            padding: 15px 40px;
+            font-size: 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            transition: transform 0.2s;
+        }
+
+        button:hover {
+            transform: scale(1.05);
+        }
+
+        button:active {
+            transform: scale(0.95);
+        }
+
+        .instruction {
+            color: #fff;
+            font-size: 18px;
+            margin: 20px;
+            text-align: center;
+            max-width: 600px;
+        }
+
+        #loadingText {
+            color: #fff;
+            font-size: 20px;
+            margin-top: 20px;
+        }
+
+        .lives {
+            color: #e74c3c;
+            font-size: 24px;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        
+        <div id="cameraContainer">
+            <video id="webcam" autoplay playsinline></video>
+            <canvas id="canvasOverlay"></canvas>
+        </div>
+
+        <div id="scoreBoard">
+            <h2>🎮 Game Stats</h2>
+            <p>Score: <span class="score-value" id="score">0</span></p>
+            <p>Combo: <span class="score-value" id="combo">0</span>x</p>
+            <p class="lives">Lives: <span id="lives">❤️❤️❤️</span></p>
+        </div>
+
+        <div id="startScreen">
+            <h1>🍉 Fruit Ninja 🗡️</h1>
+            <p class="instruction">
+                Use your hand to control the sword and slice fruits!<br>
+                ✨ Avoid bombs 💣<br>
+                ✨ Don't let fruits fall ⬇️<br>
+                ✨ Build combos for bonus points! 🔥
+            </p>
+            <p id="loadingText">Initializing hand tracking...</p>
+            <button id="startBtn" style="display:none;">START GAME</button>
+        </div>
+
+        <div id="gameOverScreen">
+            <h1>GAME OVER!</h1>
+            <p class="instruction">
+                Final Score: <span class="score-value" id="finalScore">0</span><br>
+                High Score: <span class="score-value" id="highScore">0</span>
+            </p>
+            <button id="restartBtn">PLAY AGAIN</button>
+        </div>
+    </div>
+
+    <!-- MediaPipe Hands -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <script>
+        // Game Configuration
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const video = document.getElementById('webcam');
+        const overlayCanvas = document.getElementById('canvasOverlay');
+        const overlayCtx = overlayCanvas.getContext('2d');
+
+        canvas.width = window.innerWidth - 340;
+        canvas.height = window.innerHeight;
+        overlayCanvas.width = 320;
+        overlayCanvas.height = 240;
+
+        // Game State
+        let gameStarted = false;
+        let score = 0;
+        let lives = 3;
+        let combo = 0;
+        let comboTimer = 0;
+        let highScore = localStorage.getItem('fruitNinjaHighScore') || 0;
+        let handPosition = { x: canvas.width / 2, y: canvas.height / 2 };
+        let previousHandPositions = [];
+        const maxTrailLength = 15;
+
+        // Game Objects
+        let fruits = [];
+        let particles = [];
+        let sliceTrails = [];
+
+        // Fruit Types
+        const fruitTypes = [
+            { name: '🍎', color: '#ff4444', points: 10 },
+            { name: '🍊', color: '#ff8c00', points: 10 },
+            { name: '🍋', color: '#ffff00', points: 10 },
+            { name: '🍉', color: '#ff69b4', points: 15 },
+            { name: '🍇', color: '#9370db', points: 10 },
+            { name: '🍓', color: '#ff1493', points: 10 },
+            { name: '🥝', color: '#9acd32', points: 12 },
+            { name: '🍌', color: '#ffff00', points: 10 },
+            { name: '🍑', color: '#ffdab9', points: 10 },
+            { name: '🥥', color: '#8b4513', points: 12 }
+        ];
+
+        // Fruit/Bomb Class
+        class Fruit {
+            constructor() {
+                this.x = Math.random() * canvas.width;
+                this.y = canvas.height + 50;
+                this.vx = (Math.random() - 0.5) * 8;
+                this.vy = -(12 + Math.random() * 8);
+                this.rotation = 0;
+                this.rotationSpeed = (Math.random() - 0.5) * 0.3;
+                this.gravity = 0.4;
+                this.size = 40 + Math.random() * 20;
+                this.sliced = false;
+                
+                if (Math.random() < 0.15) {
+                    this.isBomb = true;
+                    this.type = { name: '💣', color: '#333', points: 0 };
+                } else {
+                    this.isBomb = false;
+                    this.type = fruitTypes[Math.floor(Math.random() * fruitTypes.length)];
+                }
+            }
+
+            update() {
+                this.vy += this.gravity;
+                this.x += this.vx;
+                this.y += this.vy;
+                this.rotation += this.rotationSpeed;
+            }
+
+            draw() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.rotation);
+                ctx.font = `${this.size}px Arial`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(this.type.name, 0, 0);
+                ctx.restore();
+            }
+
+            isOffScreen() {
+                return this.y > canvas.height + 100;
+            }
+
+            checkCollision(handX, handY) {
+                const dx = this.x - handX;
+                const dy = this.y - handY;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                return distance < this.size;
+            }
+        }
+
+        // Particle Class
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.vx = (Math.random() - 0.5) * 10;
+                this.vy = (Math.random() - 0.5) * 10;
+                this.color = color;
+                this.size = Math.random() * 5 + 3;
+                this.life = 1;
+                this.decay = 0.02;
+            }
+
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.vy += 0.3;
+                this.life -= this.decay;
+            }
+
+            draw() {
+                ctx.globalAlpha = this.life;
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalAlpha = 1;
+            }
+
+            isDead() {
+                return this.life <= 0;
+            }
+        }
+
+        // Slice Trail Class
+        class SliceTrail {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.life = 1;
+                this.decay = 0.05;
+            }
+
+            update() {
+                this.life -= this.decay;
+            }
+
+            isDead() {
+                return this.life <= 0;
+            }
+        }
+
+        // Hand Tracking Setup
+        let hands;
+        let camera;
+
+        function onResults(results) {
+            overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+            
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                
+                // Draw hand landmarks on overlay
+                overlayCtx.fillStyle = '#00FF00';
+                for (const landmark of landmarks) {
+                    overlayCtx.beginPath();
+                    overlayCtx.arc(
+                        landmark.x * overlayCanvas.width,
+                        landmark.y * overlayCanvas.height,
+                        5, 0, Math.PI * 2
+                    );
+                    overlayCtx.fill();
+                }
+
+                // Get index finger tip (landmark 8)
+                const indexTip = landmarks[8];
+                
+                // Map to game canvas coordinates (flip X for mirror effect)
+                handPosition.x = (1 - indexTip.x) * canvas.width;
+                handPosition.y = indexTip.y * canvas.height;
+
+                // Store position for trail
+                previousHandPositions.push({ ...handPosition });
+                if (previousHandPositions.length > maxTrailLength) {
+                    previousHandPositions.shift();
+                }
+
+                // Add slice trail
+                if (gameStarted) {
+                    sliceTrails.push(new SliceTrail(handPosition.x, handPosition.y));
+                }
+            }
+        }
+
+        async function initializeHandTracking() {
+            hands = new Hands({
+                locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+                }
+            });
+
+            hands.setOptions({
+                maxNumHands: 1,
+                modelComplexity: 1,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+
+            hands.onResults(onResults);
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        width: 640, 
+                        height: 480,
+                        facingMode: 'user'
+                    } 
+                });
+                
+                video.srcObject = stream;
+                
+                video.onloadedmetadata = () => {
+                    camera = new Camera(video, {
+                        onFrame: async () => {
+                            await hands.send({ image: video });
+                        },
+                        width: 640,
+                        height: 480
+                    });
+                    camera.start();
+                    
+                    document.getElementById('loadingText').textContent = 'Camera ready! 📸';
+                    document.getElementById('startBtn').style.display = 'inline-block';
+                };
+            } catch (err) {
+                console.error('Camera access error:', err);
+                document.getElementById('loadingText').textContent = 'Camera access denied. Please allow camera access and refresh.';
+            }
+        }
+
+        // Spawn Fruits
+        function spawnFruit() {
+            if (gameStarted && Math.random() < 0.03) {
+                fruits.push(new Fruit());
+            }
+        }
+
+        // Create Particles
+        function createParticles(x, y, color, count = 20) {
+            for (let i = 0; i < count; i++) {
+                particles.push(new Particle(x, y, color));
+            }
+        }
+
+        // Draw Sword
+        function drawSword() {
+            if (previousHandPositions.length < 2) return;
+
+            // Draw motion blur trail
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.lineCap = 'round';
+
+            for (let i = 1; i < previousHandPositions.length; i++) {
+                const alpha = i / previousHandPositions.length;
+                ctx.globalAlpha = alpha * 0.5;
+                ctx.beginPath();
+                ctx.moveTo(previousHandPositions[i - 1].x, previousHandPositions[i - 1].y);
+                ctx.lineTo(previousHandPositions[i].x, previousHandPositions[i].y);
+                ctx.stroke();
+            }
+            ctx.globalAlpha = 1;
+
+            // Draw sword at hand position
+            ctx.save();
+            ctx.translate(handPosition.x, handPosition.y);
+            
+            // Calculate rotation based on movement
+            if (previousHandPositions.length >= 2) {
+                const prev = previousHandPositions[previousHandPositions.length - 2];
+                const angle = Math.atan2(handPosition.y - prev.y, handPosition.x - prev.x);
+                ctx.rotate(angle);
+            }
+
+            // Draw sword
+            ctx.fillStyle = '#C0C0C0';
+            ctx.fillRect(-5, -40, 10, 80);
+            
+            ctx.fillStyle = '#FFD700';
+            ctx.fillRect(-8, -45, 16, 10);
+            
+            ctx.fillStyle = '#8B4513';
+            ctx.fillRect(-6, 35, 12, 15);
+
+            ctx.restore();
+
+            // Draw glow effect
+            ctx.save();
+            ctx.globalAlpha = 0.3;
+            ctx.fillStyle = '#FFFFFF';
+            ctx.beginPath();
+            ctx.arc(handPosition.x, handPosition.y, 30, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        // Update Game
+        function updateGame() {
+            // Update fruits
+            for (let i = fruits.length - 1; i >= 0; i--) {
+                const fruit = fruits[i];
+                fruit.update();
+
+                // Check collision with sword
+                if (!fruit.sliced && fruit.checkCollision(handPosition.x, handPosition.y)) {
+                    fruit.sliced = true;
+                    
+                    if (fruit.isBomb) {
+                        // Hit bomb - game over
+                        lives = 0;
+                        createParticles(fruit.x, fruit.y, '#ff0000', 50);
+                    } else {
+                        // Hit fruit - score points
+                        const comboMultiplier = Math.floor(combo / 3) + 1;
+                        score += fruit.type.points * comboMultiplier;
+                        combo++;
+                        comboTimer = 60; // 1 second at 60fps
+                        createParticles(fruit.x, fruit.y, fruit.type.color);
+                    }
+                    
+                    fruits.splice(i, 1);
+                    continue;
+                }
+
+                // Remove if off screen
+                if (fruit.isOffScreen()) {
+                    if (!fruit.isBomb && !fruit.sliced) {
+                        lives--;
+                    }
+                    fruits.splice(i, 1);
+                }
+            }
+
+            // Update particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                particles[i].update();
+                if (particles[i].isDead()) {
+                    particles.splice(i, 1);
+                }
+            }
+
+            // Update slice trails
+            for (let i = sliceTrails.length - 1; i >= 0; i--) {
+                sliceTrails[i].update();
+                if (sliceTrails[i].isDead()) {
+                    sliceTrails.splice(i, 1);
+                }
+            }
+
+            // Update combo
+            if (comboTimer > 0) {
+                comboTimer--;
+            } else {
+                combo = 0;
+            }
+
+            // Check game over
+            if (lives <= 0) {
+                gameOver();
+            }
+
+            // Update UI
+            document.getElementById('score').textContent = score;
+            document.getElementById('combo').textContent = combo;
+            document.getElementById('lives').textContent = '❤️'.repeat(Math.max(0, lives));
+        }
+
+        // Draw Game
+        function drawGame() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw gradient background
+            const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            gradient.addColorStop(0, '#87CEEB');
+            gradient.addColorStop(1, '#E0F6FF');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw slice trails
+            for (const trail of sliceTrails) {
+                ctx.globalAlpha = trail.life * 0.5;
+                ctx.fillStyle = '#FFFFFF';
+                ctx.beginPath();
+                ctx.arc(trail.x, trail.y, 5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+
+            // Draw particles
+            for (const particle of particles) {
+                particle.draw();
+            }
+
+            // Draw fruits
+            for (const fruit of fruits) {
+                fruit.draw();
+            }
+
+            // Draw sword
+            drawSword();
+
+            // Draw combo indicator
+            if (combo > 2) {
+                ctx.save();
+                ctx.font = 'bold 48px Arial';
+                ctx.fillStyle = '#FFD700';
+                ctx.strokeStyle = '#FF4500';
+                ctx.lineWidth = 3;
+                ctx.textAlign = 'center';
+                const text = `${combo}x COMBO! 🔥`;
+                ctx.strokeText(text, canvas.width / 2, 100);
+                ctx.fillText(text, canvas.width / 2, 100);
+                ctx.restore();
+            }
+        }
+
+        // Game Loop
+        function gameLoop() {
+            if (gameStarted) {
+                spawnFruit();
+                updateGame();
+            }
+            drawGame();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Start Game
+        function startGame() {
+            gameStarted = true;
+            score = 0;
+            lives = 3;
+            combo = 0;
+            fruits = [];
+            particles = [];
+            sliceTrails = [];
+            document.getElementById('startScreen').style.display = 'none';
+            document.getElementById('gameOverScreen').style.display = 'none';
+        }
+
+        // Game Over
+        function gameOver() {
+            gameStarted = false;
+            
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('fruitNinjaHighScore', highScore);
+            }
+            
+            document.getElementById('finalScore').textContent = score;
+            document.getElementById('highScore').textContent = highScore;
+            document.getElementById('gameOverScreen').style.display = 'flex';
+        }
+
+        // Event Listeners
+        document.getElementById('startBtn').addEventListener('click', startGame);
+        document.getElementById('restartBtn').addEventListener('click', startGame);
+
+        // Window Resize
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth - 340;
+            canvas.height = window.innerHeight;
+        });
+
+        // Initialize
+        initializeHandTracking();
+        gameLoop();
+    </script>
+</body>
+</html>
